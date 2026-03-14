@@ -61,7 +61,9 @@ const TransaccionesModulo = {
             <div class="row">
               <div class="col-md-4 mb-3">
                 <label class="form-label fw-bold">Número de documento</label>
-                <input type="text" id="numeroDocumento" class="form-control" placeholder="DOC-0001" required>
+                <select id="numeroDocumento" class="form-select" required>
+                  <option value="">Seleccione tipo de documento</option>
+                </select>
               </div>
               <div class="col-md-4 mb-3">
                 <label class="form-label fw-bold">Fecha</label>
@@ -137,6 +139,7 @@ const TransaccionesModulo = {
   cargarVista: function () {
     document.getElementById("contenido").innerHTML = this.html;
     this.cargarClientesEnSelect();
+    this.cargarTiposDocumentosEnSelect();
     this.cargarClientesEnFiltro();
     ["trans-filtro-desde", "trans-filtro-hasta", "trans-filtro-cliente", "trans-filtro-tipo"].forEach((id) => {
       const el = document.getElementById(id);
@@ -151,63 +154,144 @@ const TransaccionesModulo = {
   cargarClientesEnSelect: function () {
     const select = document.getElementById("clienteId");
     if (!select) return;
-    const clientes = JSON.parse(localStorage.getItem("clientes")) || [];
-    select.innerHTML = "<option value=\"\">Seleccione un cliente</option>";
-    clientes.forEach((c) => {
-      select.innerHTML += `<option value="${c.id}">${c.id} - ${c.nombre}</option>`;
-    });
+    // Usar API para cargar clientes
+    fetch('/api/clientes')
+      .then(response => response.json())
+      .then(clientes => {
+        select.innerHTML = "<option value=\"\">Seleccione un cliente</option>";
+        clientes.forEach((c) => {
+          select.innerHTML += `<option value="${c.id}">${c.identificador} - ${c.nombre}</option>`;
+        });
+      })
+      .catch(error => console.error('Error cargando clientes:', error));
+  },
+
+  cargarTiposDocumentosEnSelect: function () {
+    const select = document.getElementById("numeroDocumento");
+    if (!select) return;
+    // Usar API para cargar tipos de documentos
+    fetch('/api/tipos-documentos')
+      .then(response => response.json())
+      .then(tipos => {
+        select.innerHTML = "<option value=\"\">Seleccione tipo de documento</option>";
+        tipos.forEach((t) => {
+          select.innerHTML += `<option value="${t.identificador}">${t.identificador} - ${t.descripcion}</option>`;
+        });
+      })
+      .catch(error => console.error('Error cargando tipos de documentos:', error));
   },
 
   cargarClientesEnFiltro: function () {
     const select = document.getElementById("trans-filtro-cliente");
     if (!select) return;
-    const clientes = JSON.parse(localStorage.getItem("clientes")) || [];
-    select.innerHTML = "<option value=\"\">Todos los clientes</option>";
-    clientes.forEach((c) => {
-      select.innerHTML += `<option value="${c.id}">${c.nombre}</option>`;
-    });
+    // Usar API para cargar clientes
+    fetch('/api/clientes')
+      .then(response => response.json())
+      .then(clientes => {
+        select.innerHTML = "<option value=\"\">Todos los clientes</option>";
+        clientes.forEach((c) => {
+          select.innerHTML += `<option value="${c.id}">${c.nombre}</option>`;
+        });
+      })
+      .catch(error => console.error('Error cargando clientes:', error));
   },
 
-  getTransaccionesFiltradas: function () {
-    let transacciones = JSON.parse(localStorage.getItem("transacciones")) || [];
+  filtrarTransacciones: function (transacciones) {
     const desde = document.getElementById("trans-filtro-desde")?.value || "";
     const hasta = document.getElementById("trans-filtro-hasta")?.value || "";
     const clienteId = document.getElementById("trans-filtro-cliente")?.value || "";
     const tipo = document.getElementById("trans-filtro-tipo")?.value || "";
 
-    if (desde) transacciones = transacciones.filter((t) => t.fecha >= desde);
-    if (hasta) transacciones = transacciones.filter((t) => t.fecha <= hasta);
-    if (clienteId) transacciones = transacciones.filter((t) => t.clienteId === clienteId);
-    if (tipo) transacciones = transacciones.filter((t) => t.tipoMovimiento === tipo);
-    return transacciones;
+    let filtradas = transacciones;
+
+    if (desde) filtradas = filtradas.filter((t) => t.fecha >= desde);
+    if (hasta) filtradas = filtradas.filter((t) => t.fecha <= hasta);
+    if (clienteId) filtradas = filtradas.filter((t) => t.cliente_id == clienteId);
+    if (tipo) filtradas = filtradas.filter((t) => t.tipo_movimiento === tipo);
+
+    return filtradas;
+  },
+
+  mostrarTransaccionesEnTabla: function (transacciones, tbody, tfoot, countEl) {
+    if (countEl) countEl.innerHTML = "Mostrando <strong>" + transacciones.length + "</strong> transacción(es).";
+
+    let sumDb = 0, sumCr = 0;
+    transacciones.forEach((t) => {
+      const monto = parseFloat(t.monto) || 0;
+      if (t.tipo_movimiento === "DB") sumDb += monto;
+      else sumCr += monto;
+    });
+    const balanceFiltrado = sumDb - sumCr;
+
+    if (transacciones.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="8" class="empty-state"><i class="fas fa-exchange-alt"></i><p>No hay transacciones que coincidan con los filtros.</p></td></tr>';
+      if (tfoot) tfoot.innerHTML = "";
+      return;
+    }
+
+    tbody.innerHTML = "";
+    transacciones.forEach((t) => {
+      const nombreCliente = t.cliente_nombre || t.cliente_id;
+      const badgeClass = t.tipo_movimiento === "DB" ? "bg-primary" : "bg-success";
+      const tr = document.createElement("tr");
+      tr.innerHTML = `
+        <td class="ps-4 fw-bold">${t.identificador}</td>
+        <td><span class="badge ${badgeClass}">${t.tipo_movimiento}</span></td>
+        <td>${t.tipo_documento}</td>
+        <td>${t.numero_documento}</td>
+        <td>${t.fecha}</td>
+        <td>${nombreCliente}</td>
+        <td class="text-end">RD$ ${parseFloat(t.monto).toLocaleString("es-DO", { minimumFractionDigits: 2 })}</td>
+        <td class="text-center">
+          <button onclick="TransaccionesModulo.editar(${t.id})" class="btn btn-sm btn-outline-primary me-2"><i class="fas fa-edit"></i> Editar</button>
+          <button onclick="TransaccionesModulo.eliminar(${t.id})" class="btn btn-sm btn-outline-danger"><i class="fas fa-trash-alt"></i> Eliminar</button>
+        </td>
+      `;
+      tbody.appendChild(tr);
+    });
+
+    if (tfoot) {
+      tfoot.innerHTML = `
+        <tr class="table-light fw-bold">
+          <td colspan="5" class="ps-4">Totales filtrados</td>
+          <td class="text-end">DB: RD$ ${sumDb.toLocaleString("es-DO", { minimumFractionDigits: 2 })}</td>
+          <td class="text-end">CR: RD$ ${sumCr.toLocaleString("es-DO", { minimumFractionDigits: 2 })}</td>
+          <td class="text-end">Balance: RD$ ${balanceFiltrado.toLocaleString("es-DO", { minimumFractionDigits: 2 })}</td>
+        </tr>
+      `;
+    }
   },
 
   actualizarEstadisticas: function () {
-    const transacciones = JSON.parse(localStorage.getItem("transacciones")) || [];
-    let debitos = 0, creditos = 0, balance = 0;
-    transacciones.forEach((t) => {
-      const monto = parseFloat(t.monto) || 0;
-      if (t.tipoMovimiento === "DB") {
-        debitos += monto;
-        balance += monto;
-      } else {
-        creditos += monto;
-        balance -= monto;
-      }
-    });
+    fetch('/api/transacciones')
+      .then(response => response.json())
+      .then(transacciones => {
+        let debitos = 0, creditos = 0, balance = 0;
+        transacciones.forEach((t) => {
+          const monto = parseFloat(t.monto) || 0;
+          if (t.tipo_movimiento === "DB") {
+            debitos += monto;
+            balance += monto;
+          } else {
+            creditos += monto;
+            balance -= monto;
+          }
+        });
 
-    const fmt = (n) => "RD$ " + n.toLocaleString("es-DO", { minimumFractionDigits: 2 });
-    const totalEl = document.getElementById("trans-stat-total");
-    const debEl = document.getElementById("trans-stat-debitos");
-    const crEl = document.getElementById("trans-stat-creditos");
-    const balEl = document.getElementById("trans-stat-balance");
-    if (totalEl) totalEl.textContent = transacciones.length;
-    if (debEl) debEl.textContent = fmt(debitos);
-    if (crEl) crEl.textContent = fmt(creditos);
-    if (balEl) {
-      balEl.textContent = fmt(balance);
-      balEl.style.color = balance >= 0 ? "#059669" : "#dc2626";
-    }
+        const fmt = (n) => "RD$ " + n.toLocaleString("es-DO", { minimumFractionDigits: 2 });
+        const totalEl = document.getElementById("trans-stat-total");
+        const debEl = document.getElementById("trans-stat-debitos");
+        const crEl = document.getElementById("trans-stat-creditos");
+        const balEl = document.getElementById("trans-stat-balance");
+        if (totalEl) totalEl.textContent = transacciones.length;
+        if (debEl) debEl.textContent = fmt(debitos);
+        if (crEl) crEl.textContent = fmt(creditos);
+        if (balEl) {
+          balEl.textContent = fmt(balance);
+          balEl.style.color = balance >= 0 ? "#059669" : "#dc2626";
+        }
+      })
+      .catch(error => console.error('Error cargando estadísticas:', error));
   },
 
   mostrarError: function (mensaje) {
@@ -227,76 +311,99 @@ const TransaccionesModulo = {
     }
 
     const transaccion = {
-      id: document.getElementById("transId").value.trim(),
-      tipoMovimiento: document.getElementById("tipoMovimiento").value,
-      tipoDocumento: document.getElementById("tipoDocumento").value.trim(),
-      numeroDocumento: document.getElementById("numeroDocumento").value.trim(),
+      identificador: document.getElementById("transId").value.trim(),
+      tipo_movimiento: document.getElementById("tipoMovimiento").value,
+      tipo_documento: document.getElementById("tipoDocumento").value.trim(),
+      numero_documento: document.getElementById("numeroDocumento").value.trim(),
       fecha: document.getElementById("fecha").value,
-      clienteId: document.getElementById("clienteId").value,
-      monto: document.getElementById("monto").value
+      cliente_id: document.getElementById("clienteId").value,
+      monto: parseFloat(document.getElementById("monto").value),
+      descripcion: "" // Opcional
     };
 
-    let transacciones = JSON.parse(localStorage.getItem("transacciones")) || [];
-    const existeId = transacciones.some((t, i) => t.id === transaccion.id && i !== this.indiceEdicion);
-    if (existeId) {
-      this.mostrarError("El identificador de transacción ya existe.");
+    // Validaciones
+    if (!transaccion.identificador) {
+      this.mostrarError("El identificador es requerido.");
       return;
     }
-    if (!transaccion.tipoMovimiento || !["DB", "CR"].includes(transaccion.tipoMovimiento)) {
+    if (!transaccion.tipo_movimiento || !["DB", "CR"].includes(transaccion.tipo_movimiento)) {
       this.mostrarError("El tipo de movimiento debe ser DB o CR.");
       return;
     }
-    if (!transaccion.clienteId) {
+    if (!transaccion.numero_documento) {
+      this.mostrarError("Debe seleccionar un tipo de documento.");
+      return;
+    }
+    if (!transaccion.cliente_id) {
       this.mostrarError("Debe seleccionar un cliente.");
       return;
     }
-    if (parseFloat(transaccion.monto) <= 0) {
+    if (transaccion.monto <= 0) {
       this.mostrarError("El monto debe ser mayor que cero.");
       return;
     }
 
-    if (this.indiceEdicion === -1) {
-      transacciones.push(transaccion);
-      alert("Transacción creada exitosamente.");
-    } else {
-      transacciones[this.indiceEdicion] = transaccion;
-      alert("Transacción actualizada exitosamente.");
-      this.cancelarEdicion();
-    }
+    const method = this.indiceEdicion === -1 ? 'POST' : 'PUT';
+    const url = this.indiceEdicion === -1 ? '/api/transacciones' : `/api/transacciones/${this.transaccionEditandoId}`;
 
-    localStorage.setItem("transacciones", JSON.stringify(transacciones));
-    if (this.indiceEdicion === -1) e.target.reset();
-    this.cargarClientesEnSelect();
-    this.cargarClientesEnFiltro();
-    this.actualizarEstadisticas();
-    this.renderizarTabla();
+    fetch(url, {
+      method: method,
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(transaccion)
+    })
+    .then(response => response.json())
+    .then(data => {
+      if (data.message) {
+        alert(data.message);
+        if (this.indiceEdicion === -1) {
+          e.target.reset();
+        } else {
+          this.cancelarEdicion();
+        }
+        this.cargarClientesEnSelect();
+        this.cargarTiposDocumentosEnSelect();
+        this.cargarClientesEnFiltro();
+        this.actualizarEstadisticas();
+        this.renderizarTabla();
+      } else if (data.error) {
+        this.mostrarError(data.error);
+      }
+    })
+    .catch(error => {
+      console.error('Error:', error);
+      this.mostrarError('Error al guardar la transacción.');
+    });
     if (typeof actualizarDashboard === "function") actualizarDashboard();
   },
 
-  editar: function (index) {
-    const transacciones = this.getTransaccionesFiltradas();
-    const t = transacciones[index];
-    const todos = JSON.parse(localStorage.getItem("transacciones")) || [];
-    const indiceReal = todos.findIndex((x) => x.id === t.id);
+  editar: function (id) {
+    fetch(`/api/transacciones/${id}`)
+      .then(response => response.json())
+      .then(t => {
+        document.getElementById("transId").value = t.identificador;
+        document.getElementById("tipoMovimiento").value = t.tipo_movimiento;
+        document.getElementById("tipoDocumento").value = t.tipo_documento;
+        document.getElementById("numeroDocumento").value = t.numero_documento;
+        document.getElementById("fecha").value = t.fecha;
+        document.getElementById("clienteId").value = t.cliente_id;
+        document.getElementById("monto").value = t.monto;
 
-    document.getElementById("transId").value = t.id;
-    document.getElementById("tipoMovimiento").value = t.tipoMovimiento;
-    document.getElementById("tipoDocumento").value = t.tipoDocumento;
-    document.getElementById("numeroDocumento").value = t.numeroDocumento;
-    document.getElementById("fecha").value = t.fecha;
-    document.getElementById("clienteId").value = t.clienteId;
-    document.getElementById("monto").value = t.monto;
-
-    this.indiceEdicion = indiceReal >= 0 ? indiceReal : index;
-    document.getElementById("titulo-form-transaccion").innerText = "Editando transacción: " + t.id;
-    const btn = document.getElementById("btn-guardar-transaccion");
-    btn.innerText = "Actualizar transacción";
-    btn.className = "btn btn-warning px-4 text-white";
-    document.getElementById("btn-cancelar-transaccion").style.display = "block";
+        this.indiceEdicion = -1; // No usar índice
+        this.transaccionEditandoId = id;
+        document.getElementById("titulo-form-transaccion").innerText = "Editando transacción: " + t.identificador;
+        const btn = document.getElementById("btn-guardar-transaccion");
+        btn.innerText = "Actualizar transacción";
+        btn.className = "btn btn-warning px-4 text-white";
+        document.getElementById("btn-cancelar-transaccion").style.display = "block";
+      })
+      .catch(error => console.error('Error cargando transacción:', error));
   },
 
   cancelarEdicion: function () {
     this.indiceEdicion = -1;
+    this.transaccionEditandoId = null;
     document.getElementById("titulo-form-transaccion").innerText = "Registro de nueva transacción";
     const btn = document.getElementById("btn-guardar-transaccion");
     btn.innerHTML = "<i class=\"fas fa-save\"></i> Guardar transacción";
@@ -305,23 +412,30 @@ const TransaccionesModulo = {
     if (document.forms[0]) document.forms[0].reset();
     const err = document.getElementById("error-msg-transaccion");
     if (err) err.style.display = "none";
-    this.cargarClientesEnSelect();
   },
 
-  eliminar: function (index) {
+  eliminar: function (id) {
     if (!confirm("¿Está seguro de eliminar esta transacción?")) return;
-    const transacciones = this.getTransaccionesFiltradas();
-    const t = transacciones[index];
-    let todos = JSON.parse(localStorage.getItem("transacciones")) || [];
-    const indiceReal = todos.findIndex((x) => x.id === t.id);
-    if (indiceReal !== -1) todos.splice(indiceReal, 1);
-    localStorage.setItem("transacciones", JSON.stringify(todos));
-    if (this.indiceEdicion === indiceReal) this.cancelarEdicion();
-    this.indiceEdicion = -1;
-    this.cargarClientesEnFiltro();
-    this.actualizarEstadisticas();
-    this.renderizarTabla();
-    if (typeof actualizarDashboard === "function") actualizarDashboard();
+    fetch(`/api/transacciones/${id}`, {
+      method: 'DELETE'
+    })
+    .then(response => response.json())
+    .then(data => {
+      if (data.message) {
+        alert(data.message);
+        this.cancelarEdicion();
+        this.cargarClientesEnFiltro();
+        this.actualizarEstadisticas();
+        this.renderizarTabla();
+        if (typeof actualizarDashboard === "function") actualizarDashboard();
+      } else if (data.error) {
+        alert('Error: ' + data.error);
+      }
+    })
+    .catch(error => {
+      console.error('Error:', error);
+      alert('Error al eliminar la transacción.');
+    });
   },
 
   renderizarTabla: function () {
@@ -330,15 +444,25 @@ const TransaccionesModulo = {
     const countEl = document.getElementById("trans-results-count");
     if (!tbody) return;
 
-    const transacciones = this.getTransaccionesFiltradas();
-    const clientes = JSON.parse(localStorage.getItem("clientes")) || [];
+    // Cargar transacciones desde API
+    fetch('/api/transacciones')
+      .then(response => response.json())
+      .then(transacciones => {
+        const filtradas = this.filtrarTransacciones(transacciones);
+        this.mostrarTransaccionesEnTabla(filtradas, tbody, tfoot, countEl);
+      })
+      .catch(error => {
+        console.error('Error cargando transacciones:', error);
+        tbody.innerHTML = '<tr><td colspan="8" class="empty-state"><i class="fas fa-exclamation-triangle"></i><p>Error al cargar transacciones.</p></td></tr>';
+      });
+  },
 
-    if (countEl) countEl.innerHTML = "Mostrando <strong>" + transacciones.length + "</strong> transacción(es).";
+  mostrarTransaccionesEnTabla: function (transacciones, tbody, tfoot, countEl) {
 
     let sumDb = 0, sumCr = 0;
     transacciones.forEach((t) => {
       const monto = parseFloat(t.monto) || 0;
-      if (t.tipoMovimiento === "DB") sumDb += monto;
+      if (t.tipo_movimiento === "DB") sumDb += monto;
       else sumCr += monto;
     });
     const balanceFiltrado = sumDb - sumCr;
@@ -350,22 +474,21 @@ const TransaccionesModulo = {
     }
 
     tbody.innerHTML = "";
-    transacciones.forEach((t, index) => {
-      const cliente = clientes.find((c) => c.id === t.clienteId);
-      const nombreCliente = cliente ? cliente.nombre : t.clienteId;
-      const badgeClass = t.tipoMovimiento === "DB" ? "bg-primary" : "bg-success";
+    transacciones.forEach((t) => {
+      const nombreCliente = t.cliente_nombre || t.cliente_id;
+      const badgeClass = t.tipo_movimiento === "DB" ? "bg-primary" : "bg-success";
       const tr = document.createElement("tr");
       tr.innerHTML = `
-        <td class="ps-4 fw-bold">${t.id}</td>
-        <td><span class="badge ${badgeClass}">${t.tipoMovimiento}</span></td>
-        <td>${t.tipoDocumento}</td>
-        <td>${t.numeroDocumento}</td>
+        <td class="ps-4 fw-bold">${t.identificador}</td>
+        <td><span class="badge ${badgeClass}">${t.tipo_movimiento}</span></td>
+        <td>${t.tipo_documento}</td>
+        <td>${t.numero_documento}</td>
         <td>${t.fecha}</td>
         <td>${nombreCliente}</td>
         <td class="text-end">RD$ ${parseFloat(t.monto).toLocaleString("es-DO", { minimumFractionDigits: 2 })}</td>
         <td class="text-center">
-          <button onclick="TransaccionesModulo.editar(${index})" class="btn btn-sm btn-outline-primary me-2"><i class="fas fa-edit"></i> Editar</button>
-          <button onclick="TransaccionesModulo.eliminar(${index})" class="btn btn-sm btn-outline-danger"><i class="fas fa-trash-alt"></i> Eliminar</button>
+          <button onclick="TransaccionesModulo.editar(${t.id})" class="btn btn-sm btn-outline-primary me-2"><i class="fas fa-edit"></i> Editar</button>
+          <button onclick="TransaccionesModulo.eliminar(${t.id})" class="btn btn-sm btn-outline-danger"><i class="fas fa-trash-alt"></i> Eliminar</button>
         </td>
       `;
       tbody.appendChild(tr);
@@ -373,11 +496,11 @@ const TransaccionesModulo = {
 
     if (tfoot) {
       tfoot.innerHTML = `
-        <tr>
-          <td colspan="5" class="total-label">Total (filtrado)</td>
-          <td class="total-label">Débitos: RD$ ${sumDb.toLocaleString("es-DO", { minimumFractionDigits: 2 })} · Créditos: RD$ ${sumCr.toLocaleString("es-DO", { minimumFractionDigits: 2 })}</td>
-          <td class="text-end fw-bold">RD$ ${balanceFiltrado.toLocaleString("es-DO", { minimumFractionDigits: 2 })}</td>
-          <td></td>
+        <tr class="table-light fw-bold">
+          <td colspan="5" class="ps-4">Totales filtrados</td>
+          <td class="text-end">DB: RD$ ${sumDb.toLocaleString("es-DO", { minimumFractionDigits: 2 })}</td>
+          <td class="text-end">CR: RD$ ${sumCr.toLocaleString("es-DO", { minimumFractionDigits: 2 })}</td>
+          <td class="text-end">Balance: RD$ ${balanceFiltrado.toLocaleString("es-DO", { minimumFractionDigits: 2 })}</td>
         </tr>
       `;
     }
